@@ -29,7 +29,7 @@ async fn main() -> zbus::Result<()> {
 	tokio::pin!(percentage_stream);
 
 	while let Some(event) = percentage_stream.next().await {
-		// Skips the follow blocks if not discharging
+		// Skips the following blocks if not discharging
 		let battery_state = device.state().await;
 		if battery_state.ok() != Some(BatteryState::Discharging) {
 			continue;

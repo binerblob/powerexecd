@@ -9,7 +9,7 @@ struct Args {
 	#[arg(long = "device", default_value = "/org/freedesktop/UPower/devices/battery_BAT0")]
 	device_path: String,
 	
-	#[arg(long = "when", action = Append, required = true)]
+	#[arg(long = "wait", action = Append, required = true)]
     percentage: Vec<u8>,
 
 	#[arg(required = true)]

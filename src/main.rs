@@ -6,10 +6,10 @@ use upower_dbus::{BatteryState, DeviceProxy};
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-	#[arg(long, default_value = "/org/freedesktop/UPower/devices/battery_BAT0")]
+	#[arg(long = "device", default_value = "/org/freedesktop/UPower/devices/battery_BAT0")]
 	device_path: String,
 	
-	#[arg(long = "wait", action = Append, required = true)]
+	#[arg(long = "when", action = Append, required = true)]
     percentage: Vec<u8>,
 
 	#[arg(required = true)]

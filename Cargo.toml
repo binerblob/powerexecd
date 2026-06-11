@@ -1,0 +1,10 @@
+[package]
+name = "powernotifyd"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+upower_dbus = "0.3.2"
+zbus = "=3.15.2"
+futures = "=0.3.32"
+clap = { version = "4.6.1", features = ["derive"] }

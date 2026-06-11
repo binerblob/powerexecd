@@ -927,7 +927,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "powernotifyd"
+name = "powerexecd"
 version = "0.1.0"
 dependencies = [
  "clap",

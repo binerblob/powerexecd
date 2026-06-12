@@ -1,24 +1,44 @@
+mod rule;
+
+use rule::Rule;
+
 use tokio::process::Command;
 use clap::{ArgAction::Append, Parser};
 use futures::stream::StreamExt;
-use upower_dbus::{BatteryState, DeviceProxy};
+use upower_dbus::DeviceProxy;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-	#[arg(long = "device", default_value = "/org/freedesktop/UPower/devices/battery_BAT0")]
-	device_path: String,
+	#[arg(short, long)]
+	verbose: bool,
 	
-	#[arg(long = "wait", action = Append, required = true)]
-    percentage: Vec<u8>,
+	#[arg(short, long = "device", default_value = "/org/freedesktop/UPower/devices/battery_BAT0")]
+	device_path: String,
 
-	#[arg(required = true)]
-	command: Vec<String>
+	#[arg(short,
+		  long,
+		  action = Append,
+		  num_args = 3,
+		  value_names = ["STATE", "PERCENTAGE", "COMMAND"],
+		  required = true
+	)]
+	when: Vec<String>,
+}
+
+macro_rules! verbose {
+    ($enabled:expr, $($arg:tt)*) => {
+        if $enabled {
+            eprintln!($($arg)*);
+        }
+    };
 }
 
 #[tokio::main]
 async fn main() -> zbus::Result<()> {
 	let args = Args::parse();
+
+	let rules = Rule::collect_from(args.when);
 
 	let connection = zbus::Connection::system().await?;
 	let battery_path = args.device_path;
@@ -28,24 +48,28 @@ async fn main() -> zbus::Result<()> {
 
 	tokio::pin!(percentage_stream);
 
-	while let Some(event) = percentage_stream.next().await {
-		// Skips the following blocks if not discharging
-		let battery_state = device.state().await;
-		if battery_state.ok() != Some(BatteryState::Discharging) {
-			continue;
-		}
+	'event_loop: while let Some(event) = percentage_stream.next().await {
+		verbose!(args.verbose, "Event loop triggered!");
+		for argument in &rules {
+			// Don't execute if not the given battery state
+			let current_battery_state = device.state().await;
+			if current_battery_state.ok() != Some(argument.state) {
+				if args.verbose { eprintln!("Current battery state not matched. Not executing..."); }
+				continue 'event_loop;
+			}
 
-		let current_percentage = event.get().await.unwrap() as u8;
-		
-		for (arg_percentage, arg_command) in args.percentage.iter().zip(&args.command) {
-			if &current_percentage == arg_percentage {
-				// shell(arg_command.to_string());
+			// Execute if the given battery percentage
+			let current_percentage = event.get().await.unwrap() as u8;
+			if current_percentage == argument.percentage {
+				verbose!(args.verbose, "On target percentage, executing: \"{}\"", argument.command);
 				Command::new("sh")
 					.arg("-c")
-					.arg(arg_command)
+					.arg(&argument.command)
 					.spawn()?
 					.wait()
 					.await?;
+			} else {
+				verbose!(args.verbose, "Current percentage not matched. Not executing...")
 			}
 		}
 	}

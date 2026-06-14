@@ -1,14 +1,11 @@
-use tokio::process::Command;
+use tokio::{net::UnixListener, process::Command};
 use clap::{ArgAction::Append, Parser};
 use futures::stream::StreamExt;
 
 pub mod dbus;
 
-use dbus::{
-    upower::{DeviceProxy, BatteryState},
-    logind::ManagerProxy
-};
-use tracing::{Level, info};
+use dbus::upower::{DeviceProxy, BatteryState};
+use tracing::{Level, info, error};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -95,56 +92,8 @@ async fn battery_loop(
     Ok(())
 }
 
-async fn session_loop(manager: ManagerProxy<'_>) -> zbus::Result<()> {
-    let session_id =
-        std::env::var("XDG_SESSION_ID")
-            .expect("No session. Perhaps you might want to run --no-session?");
-
-    let attached_session =
-        manager.get_session(session_id).await?;
-    
-    let stream = manager.receive_session_removed().await?;
- 
-    tokio::pin!(stream);
-    
-    while let Some(event) = stream.next().await {
-        info!("Session loop triggered!");
-        
-        let received_session = event.args();
-
-        let received_session_str =
-            received_session.unwrap().object_path().clone().to_string();
-
-        let attached_session_str =
-            attached_session.to_string();
-
-        info!("Session received: {}", received_session_str);
-        info!("Session attached: {}", attached_session_str);
-
-        let received_id: u32 = received_session_str
-            [received_session_str.find('_').unwrap() + 1..]
-            .parse()
-            .expect("Failed to parse received ID");
-        
-        let attached_id: u32 = attached_session_str
-            [received_session_str.find('_').unwrap() + 1..]
-            .parse()
-            .expect("Failed to parse attached ID");
-        
-        info!("ID received: {}", received_id);
-        info!("ID attached: {}", attached_id);
-        
-        // Fuck it
-        if (received_id + 1) == attached_id {
-            info!("Nuking the process...");
-            break;
-        }
-    }
-    Ok(())
-}
-
 #[tokio::main]
-async fn main() -> zbus::Result<()> { 
+async fn main() -> zbus::Result<()> {
     let args = Args::parse();
     
     let level = if args.verbose {
@@ -158,19 +107,25 @@ async fn main() -> zbus::Result<()> {
         .with_writer(std::io::stdout)
         .init();
 
-    let connection = zbus::Connection::system().await?;
+    let socket_name = "\0powerexecd_single_instance_socket";
 
-    // Battery loop
+    let listener = match UnixListener::bind(socket_name) {
+        Ok(listener) => listener,
+        Err(_) => {
+            error!("powerexecd is already running! Exiting...");
+            std::process::exit(0)
+        }
+    };
+
+    info!("Unix listener: {:?}", listener.local_addr().unwrap());
+
+    let connection = zbus::Connection::system().await?;
     let rules = Rule::collect_from(args.when);
     let device = DeviceProxy::new(&connection, args.device_path).await?;
 
-    // Session loop
-    let manager = ManagerProxy::new(&connection).await?;
-    
-    tokio::select! {
-        result = battery_loop(device, rules) => result?,
-        result = session_loop(manager) => result?
-    }
+    battery_loop(device, rules).await?;
+
+    drop(listener);
     
     Ok(())
 }
